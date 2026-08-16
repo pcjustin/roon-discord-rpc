@@ -191,12 +191,13 @@ const roon = new RoonApi({
                         const prevSeek = lastKnownSeek[e.zone_id] != null ? lastKnownSeek[e.zone_id] : e.seek_position;
                         const delta = Math.abs(e.seek_position - prevSeek);
                         const flagged = delta > 5;
-                        if (flagged) manualSeek = true;
-                        console.log(
-                            "Seek tick:", zone.display_name,
-                            "prev=" + prevSeek, "new=" + e.seek_position,
-                            "delta=" + delta, "manualSeek=" + flagged
-                        );
+                        if (flagged) {
+                            manualSeek = true;
+                            console.log(
+                                "Manual seek detected:", zone.display_name,
+                                "prev=" + prevSeek, "new=" + e.seek_position, "delta=" + delta
+                            );
+                        }
                         lastKnownSeek[e.zone_id] = e.seek_position;
                     });
                 }

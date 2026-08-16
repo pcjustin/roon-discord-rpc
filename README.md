@@ -5,7 +5,7 @@ Connects to your Roon Core and mirrors the currently playing track (title, artis
 ## Prerequisites
 
 - Windows
-- [Node.js LTS](https://nodejs.org/) installed
+- [Node.js 20 or later](https://nodejs.org/) installed
 - [Git](https://git-scm.com/download/win) installed (needed by `npm install` to fetch Roon's SDK packages from GitHub)
 - Roon Core reachable on the same network
 - Discord desktop app installed
