@@ -1,0 +1,14 @@
+{
+  "name": "roon-discord-presence",
+  "version": "1.0.0",
+  "description": "Shows the track currently playing in Roon as Discord Rich Presence",
+  "main": "index.js",
+  "license": "MIT",
+  "dependencies": {
+    "node-roon-api": "github:RoonLabs/node-roon-api",
+    "node-roon-api-transport": "github:RoonLabs/node-roon-api-transport",
+    "node-roon-api-status": "github:RoonLabs/node-roon-api-status",
+    "node-roon-api-image": "github:RoonLabs/node-roon-api-image",
+    "discord-rpc": "^4.0.1"
+  }
+}
