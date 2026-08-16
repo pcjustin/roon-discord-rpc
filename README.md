@@ -1,6 +1,6 @@
 # Roon Discord Presence
 
-Connects to your Roon Core and mirrors the currently playing track (title, artist, elapsed time, and album art) to your Discord Rich Presence (the "Playing X" status on your Discord profile).
+Connects to your Roon Core and mirrors the currently playing track (title, artist, a live progress bar, and album art) to your Discord Rich Presence, shown as a "Listening to" status on your Discord profile.
 
 ## Prerequisites
 

@@ -8,7 +8,8 @@ const RoonApi = require("node-roon-api");
 const RoonApiStatus = require("node-roon-api-status");
 const RoonApiTransport = require("node-roon-api-transport");
 const RoonApiImage = require("node-roon-api-image");
-const RPC = require("discord-rpc");
+const { Client: DiscordClient } = require("@xhayper/discord-rpc");
+const { ActivityType } = require("discord-api-types/v10");
 
 const origLog = console.log;
 const origError = console.error;
@@ -33,11 +34,12 @@ let roonCore = null;
 let discordReady = false;
 let rpc;
 
-// discord-rpc's Client caches its connect() promise forever (even on failure/close),
-// so reusing one Client across retries would make every retry after the first a no-op.
-// Recreating the Client each attempt gives each attempt a fresh connect() promise.
+// discord-rpc clients (this one included) cache their connect() promise forever
+// (even on failure/close), so reusing one Client across retries would make every
+// retry after the first a no-op. Recreating the Client each attempt gives each
+// attempt a fresh connect() promise.
 function connectDiscord() {
-    rpc = new RPC.Client({ transport: "ipc" });
+    rpc = new DiscordClient({ clientId: config.discordClientId, transport: "ipc" });
 
     rpc.on("ready", () => {
         discordReady = true;
@@ -45,13 +47,13 @@ function connectDiscord() {
         schedulePresence();
     });
 
-    rpc.transport.on("close", () => {
+    rpc.on("disconnected", () => {
         discordReady = false;
         console.log("Discord connection closed, reconnecting in 15s...");
         setTimeout(connectDiscord, 15000);
     });
 
-    rpc.login({ clientId: config.discordClientId }).catch((err) => {
+    rpc.login().catch((err) => {
         console.error("Discord connect failed, retrying in 15s:", err.message);
         setTimeout(connectDiscord, 15000);
     });
@@ -234,7 +236,11 @@ function schedulePresence() {
 }
 
 function updatePresence() {
-    if (!discordReady) return;
+    // rpc.user is set from the READY dispatch's data.user, which is normally always
+    // present for a local IPC login, but the library only sets it conditionally - so
+    // guard against the rare case where it's absent, since rpc.user.setActivity would
+    // otherwise throw synchronously (before .catch can attach) and crash the process.
+    if (!discordReady || !rpc.user) return;
 
     const playing = Object.values(zones).find((z) => z.state === "playing" && z.now_playing);
     if (!playing) {
@@ -255,12 +261,19 @@ function updatePresence() {
         "| hasArt=" + hasArt
     );
 
-    // Discord shows elapsed time counting up when only startTimestamp is set,
-    // and remaining/countdown time when endTimestamp is also set. Elapsed is preferred here.
-    rpc.setActivity({
+    const length = playing.now_playing.length;
+    const start = Date.now() - seek * 1000;
+
+    // type: Listening is what makes Discord render the Spotify-style progress bar
+    // (elapsed/remaining with a slider) instead of plain "Playing" text - the old
+    // discord-rpc package didn't expose an activity type at all, which is why this
+    // wasn't achievable before switching to @xhayper/discord-rpc.
+    rpc.user.setActivity({
+        type: ActivityType.Listening,
         details: line.line1,
         state: line.line2 || undefined,
-        startTimestamp: Date.now() - seek * 1000,
+        startTimestamp: start,
+        endTimestamp: length ? start + length * 1000 : undefined,
         largeImageKey: hasArt ? `${tunnelUrl}/?k=${encodeURIComponent(currentImage.key)}` : undefined,
         largeImageText: line.line3 || undefined,
         instance: false,
@@ -268,8 +281,8 @@ function updatePresence() {
 }
 
 function clearPresence() {
-    if (!discordReady) return;
-    rpc.clearActivity().catch(() => {});
+    if (!discordReady || !rpc.user) return;
+    rpc.user.clearActivity().catch(() => {});
 }
 
 roon.start_discovery();
