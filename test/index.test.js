@@ -323,3 +323,23 @@ test("Roon's pairing state is kept out of config.json", () => {
         "the Roon SDK's state landed in the app's own config file"
     );
 });
+
+test("titles Discord would reject are padded and truncated, not dropped", () => {
+    reset();
+    const short = playing("z1", "art-13", "夢", "李");
+    short.now_playing.three_line.line3 = "";
+    playTrack(short);
+    deliverImage("art-13", "COVER-THIRTEEN");
+    assert.strictEqual(lastActivity().details, "夢 ");
+    assert.strictEqual(lastActivity().state, "李 ");
+    assert.strictEqual(lastActivity().largeImageText, undefined);
+
+    reset();
+    const long = playing("z1", "art-14", "T".repeat(200), "A".repeat(200));
+    long.now_playing.three_line.line3 = "L".repeat(200);
+    playTrack(long);
+    deliverImage("art-14", "COVER-FOURTEEN");
+    assert.strictEqual(lastActivity().details.length, 128);
+    assert.strictEqual(lastActivity().state.length, 128);
+    assert.strictEqual(lastActivity().largeImageText.length, 128);
+});

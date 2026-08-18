@@ -307,6 +307,16 @@ function schedulePresence() {
     presenceTimer = setTimeout(updatePresence, 300);
 }
 
+// Discord rejects the whole SET_ACTIVITY payload if details/state/largeImageText is
+// 1 character or longer than 128 - the update is dropped and the track never appears.
+// Both ends occur in a real library: single-character CJK titles, and classical track
+// names that run well past 128 characters.
+function formatLine(line) {
+    if (!line) return undefined;
+    if (line.length === 1) return line + " ";
+    return line.slice(0, 128);
+}
+
 function updatePresence() {
     // rpc.user is set from the READY dispatch's data.user, which is normally always
     // present for a local IPC login, but the library only sets it conditionally - so
@@ -347,12 +357,12 @@ function updatePresence() {
     // wasn't achievable before switching to @xhayper/discord-rpc.
     rpc.user.setActivity({
         type: ActivityType.Listening,
-        details: line.line1,
-        state: line.line2 || undefined,
+        details: formatLine(line.line1),
+        state: formatLine(line.line2),
         startTimestamp: start,
         endTimestamp: length ? start + length * 1000 : undefined,
         largeImageKey: hasArt ? `${tunnelUrl}/?k=${encodeURIComponent(imageKey)}` : undefined,
-        largeImageText: line.line3 || undefined,
+        largeImageText: formatLine(line.line3),
         instance: false,
     }).catch((err) => console.error("Failed to set Discord activity:", err.message));
 }
