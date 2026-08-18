@@ -15,6 +15,7 @@ echo Startup launcher was not found - nothing to remove.
 :done
 echo.
 echo node_modules and this project folder were left untouched.
-echo If the app is currently running, it will stop the next time you log out,
-echo or you can end it manually via Task Manager (look for node.exe).
+echo If the app is currently running, it will stop the next time you log out.
+echo To end it now, close its Windows Command Processor task in Task Manager -
+echo ending node.exe alone just makes the launcher start it again.
 pause

@@ -35,7 +35,17 @@ This URL is randomly generated and changes every time the app restarts. Anyone w
 
 ## Checking it's working / troubleshooting
 
-Look at `roon-discord.log` in this folder. It logs pairing status, Discord connection state, and retry attempts (e.g. Discord IPC retries every 15s if Discord isn't running yet, cloudflared retries every 3s if it drops).
+Look at `roon-discord.log` in this folder. It logs pairing status, Discord connection state, and retry attempts (e.g. Discord IPC retries every 15s if Discord isn't running yet, cloudflared retries every 3s if it drops). If the app itself exits - for example when Windows starts it before the network is up - the launcher restarts it 15 seconds later and the log records the exit code.
+
+## Running the tests
+
+```
+npm test
+```
+
+The suite (`node --test`, no test framework to install) covers the presence logic: which cover art gets served for which track, skipping back and forth between tracks, and cover fetches that fail or never answer. It replaces Roon, Discord, cloudflared and the local web server with stand-ins and runs on a fake clock, so it needs no `npm install`, no Roon Core, no Discord and no network, finishes in well under a second, and can be run on any platform - not just Windows.
+
+Not covered: `install.bat`, `start.bat` and the Windows startup launcher. If those need checking, reboot and look for a fresh `Roon Discord Presence starting` line in `roon-discord.log`.
 
 ## Uninstalling
 

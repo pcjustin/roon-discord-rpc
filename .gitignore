@@ -1,3 +1,4 @@
 node_modules/
 cloudflared.exe
 roon-discord.log
+roonstate.json

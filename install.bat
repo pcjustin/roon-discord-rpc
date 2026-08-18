@@ -89,7 +89,7 @@ if not exist "%STARTUP_DIR%" mkdir "%STARTUP_DIR%"
 
 echo Creating startup launcher...
 echo Set WshShell = CreateObject("WScript.Shell") > "%VBS_FILE%"
-echo WshShell.Run "cmd /c cd /d ""%INSTALL_DIR%"" && node index.js >> ""roon-discord.log"" 2>&1", 0, False >> "%VBS_FILE%"
+echo WshShell.Run """%INSTALL_DIR%\start.bat""", 0, False >> "%VBS_FILE%"
 
 echo Starting Roon Discord Presence now...
 wscript.exe "%VBS_FILE%"

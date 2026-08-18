@@ -16,7 +16,29 @@ const origError = console.error;
 console.log = (...args) => origLog(new Date().toISOString(), ...args);
 console.error = (...args) => origError(new Date().toISOString(), ...args);
 
-const config = JSON.parse(fs.readFileSync(path.join(__dirname, "config.json"), "utf8"));
+console.log("Roon Discord Presence starting, pid " + process.pid);
+
+const CONFIG_FILE = path.join(__dirname, "config.json");
+
+let config;
+try {
+    // The BOM strip is for Notepad, which saves UTF-8 with one and makes JSON.parse
+    // throw on a file the user has no reason to think is wrong. The catch matters
+    // because the launcher restarts this process every 15s: an unhandled read error
+    // fills the log with the same stack trace instead of saying what to do about it.
+    config = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8").replace(/^\uFEFF/, ""));
+} catch (err) {
+    console.error("Could not read " + CONFIG_FILE + " - " + err.message);
+    console.error("It must sit next to index.js and hold your Discord Application ID (see README.md).");
+    process.exit(1);
+}
+
+// The Roon SDK's default persisted-state store is a relative "config.json" in the
+// process's working directory - i.e. our own config file. It rewrites that file on
+// every pairing, so any hiccup reading it (a BOM, a partial write) drops
+// discordClientId and the next launch exits at the check below. Own state file,
+// absolute path, no overlap.
+const STATE_FILE = path.join(__dirname, "roonstate.json");
 
 if (!config.discordClientId || config.discordClientId === "YOUR_DISCORD_APPLICATION_ID") {
     console.error("Set discordClientId in config.json first (see README.md).");
@@ -65,18 +87,32 @@ connectDiscord();
 // then tunnel that local server out to a public HTTPS URL via cloudflared, since
 // Discord's client fetches largeImageKey URLs itself and needs a public address.
 const IMAGE_PORT = 47121;
-let currentImage = null; // { buffer, contentType, key }
+// Keyed by image_key instead of a single "current image" slot: Discord fetches the
+// URL on its own schedule, long after setActivity returns, so a mutable slot serves
+// it whatever cover happens to be loaded at fetch time - which is how skipping
+// tracks ended up pairing one track's art with another track's title.
+const IMAGE_CACHE_MAX = 10;
+const images = new Map(); // image_key -> { buffer, contentType }
 let fetchingImageKey = null;
+let fetchTimer = null;
 let tunnelUrl = null;
 
 const imageServer = http.createServer((req, res) => {
-    if (!currentImage) {
+    const key = new URL(req.url, "http://127.0.0.1").searchParams.get("k");
+    const img = key && images.get(key);
+    if (!img) {
         res.writeHead(404);
         res.end();
         return;
     }
-    res.writeHead(200, { "Content-Type": currentImage.contentType, "Cache-Control": "no-store" });
-    res.end(currentImage.buffer);
+    res.writeHead(200, { "Content-Type": img.contentType, "Cache-Control": "no-store" });
+    res.end(img.buffer);
+});
+imageServer.on("error", (err) => {
+    // Doubles as a single-instance check: the launcher restarts this process, so a
+    // second copy would otherwise respawn forever fighting the first over Discord.
+    console.error("Image server could not listen on port " + IMAGE_PORT + " (already running?):", err.message);
+    process.exit(1);
 });
 imageServer.listen(IMAGE_PORT, "127.0.0.1");
 
@@ -113,20 +149,44 @@ function startTunnel() {
 }
 startTunnel();
 
+// A null result is remembered as deliberately as a real image: updatePresence waits
+// on the cover, so every failure path has to record an answer for the key. Leaving it
+// unrecorded means the next updatePresence starts the same doomed fetch again and the
+// presence never leaves the previous track.
+function rememberImage(imageKey, value) {
+    images.set(imageKey, value);
+    if (images.size > IMAGE_CACHE_MAX) images.delete(images.keys().next().value);
+}
+
 function maybeFetchImage(imageKey) {
     if (!imageKey || !roonCore) return;
-    if (fetchingImageKey === imageKey || (currentImage && currentImage.key === imageKey)) return;
+    if (fetchingImageKey === imageKey || images.has(imageKey)) return;
     fetchingImageKey = imageKey;
+    clearTimeout(fetchTimer);
+    fetchTimer = setTimeout(() => {
+        if (fetchingImageKey !== imageKey) return;
+        console.error("Cover image fetch timed out, showing track without art.");
+        fetchingImageKey = null;
+        rememberImage(imageKey, null);
+        schedulePresence();
+    }, 5000);
     roonCore.services.RoonApiImage.get_image(
         imageKey,
         { scale: "fit", width: 512, height: 512, format: "image/jpeg" },
         (err, contentType, image) => {
-            fetchingImageKey = null;
+            // Only disarm our own timer: a late callback for a track already skipped
+            // past would otherwise remove the safety net of the fetch that is currently
+            // holding the presence back.
+            if (fetchingImageKey === imageKey) {
+                clearTimeout(fetchTimer);
+                fetchingImageKey = null;
+            }
             if (err) {
                 console.error("Failed to fetch cover image:", err);
-                return;
+                rememberImage(imageKey, null);
+            } else {
+                rememberImage(imageKey, { buffer: image, contentType });
             }
-            currentImage = { buffer: image, contentType, key: imageKey };
             schedulePresence();
         }
     );
@@ -138,6 +198,17 @@ const roon = new RoonApi({
     display_version: "1.0.0",
     publisher: "Justin Lu",
     email: "pcjustin@icloud.com",
+    get_persisted_state: () => {
+        try {
+            return JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+        } catch (e) {
+            // Falls back to the SDK's old home so an existing pairing survives the move.
+            return config.roonstate || {};
+        }
+    },
+    set_persisted_state: (state) => {
+        fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 4));
+    },
     core_paired: (core) => {
         console.log("Paired with Roon Core:", core.display_name);
         roonCore = core;
@@ -249,15 +320,20 @@ function updatePresence() {
         return;
     }
 
-    maybeFetchImage(playing.now_playing.image_key);
+    const imageKey = playing.now_playing.image_key;
+    maybeFetchImage(imageKey);
+    // Wait for the cover rather than sending an art-less update first: Discord
+    // rate-limits setActivity, and two calls per track change means the second one -
+    // the one carrying the new art - is the one that gets dropped.
+    if (fetchingImageKey === imageKey) return;
 
     const line = playing.now_playing.three_line;
     const seek = playing.now_playing.seek_position || 0;
 
-    const hasArt = tunnelUrl && currentImage && currentImage.key === playing.now_playing.image_key;
+    const hasArt = Boolean(tunnelUrl && images.get(imageKey));
     console.log(
         "Presence update:", line.line1,
-        "| image_key=" + playing.now_playing.image_key,
+        "| image_key=" + imageKey,
         "| tunnelUrl=" + (tunnelUrl || "none"),
         "| hasArt=" + hasArt
     );
@@ -275,7 +351,7 @@ function updatePresence() {
         state: line.line2 || undefined,
         startTimestamp: start,
         endTimestamp: length ? start + length * 1000 : undefined,
-        largeImageKey: hasArt ? `${tunnelUrl}/?k=${encodeURIComponent(currentImage.key)}` : undefined,
+        largeImageKey: hasArt ? `${tunnelUrl}/?k=${encodeURIComponent(imageKey)}` : undefined,
         largeImageText: line.line3 || undefined,
         instance: false,
     }).catch((err) => console.error("Failed to set Discord activity:", err.message));
